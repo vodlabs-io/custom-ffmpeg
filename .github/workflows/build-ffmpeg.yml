@@ -361,43 +361,6 @@ jobs:
           cd release-bundle
           ls -lh
       
-      - name: Generate release notes
-        run: |
-          cat > release-notes.md << 'EOF'
-          # Minimal FFmpeg Binaries
-          
-          Custom-built minimal FFmpeg binaries optimized for live stream recording and post-processing.
-          
-          ## Included Features
-          - Protocols: file, pipe, http, https, tcp
-          - Demuxers: FLV, live_flv, MPEGTS, MOV, MP4, HLS, concat
-          - Muxers: MP4, MPEGTS
-          - Decoders: H.264, HEVC, AAC, MP3
-          - Encoders: libx264, AAC
-          - Parsers: H.264, HEVC, AAC, MPEG audio
-          - BSF: h264_mp4toannexb, hevc_mp4toannexb, aac_adtstoasc
-          - Filters: null, anull
-          
-          ## Binary Sizes
-          Approximate sizes (after stripping):
-          - darwin_amd64: 10-15 MB
-          - darwin_arm64: 10-15 MB
-          - linux_amd64: 12-18 MB
-          - linux_arm64: 12-18 MB
-          - windows_amd64: 15-20 MB
-          
-          ## Usage
-          Download the appropriate binary for your platform and extract it to `ffmpeg/bin/<platform>/`.
-          
-          ## Build Information
-          - FFmpeg version: 8.0
-          - Build date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          - Repository: ${{ github.repository }}
-          - Commit: ${{ github.sha }}
-          EOF
-          
-          cat release-notes.md
-      
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
