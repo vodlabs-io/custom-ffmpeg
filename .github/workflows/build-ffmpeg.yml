@@ -15,7 +15,7 @@ jobs:
           - os: macos-15-intel
             platform: darwin_amd64
             arch: x86_64
-          - os: macos-15  # ARM M1 runner
+          - os: macos-15
             platform: darwin_arm64
             arch: arm64
           - os: ubuntu-24.04
