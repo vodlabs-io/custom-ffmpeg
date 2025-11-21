@@ -223,17 +223,6 @@ jobs:
           # Clean any previous build artifacts from cached source
           make distclean 2>/dev/null || true
           
-          # Debug pkg-config setup
-          echo "=== PKG_CONFIG_PATH Debug ==="
-          echo "PWD: $PWD"
-          echo "BUILD_PREFIX: $BUILD_PREFIX"
-          echo "PKG_CONFIG_PATH will be: $BUILD_PREFIX/lib/pkgconfig"
-          ls -la "$BUILD_PREFIX/lib/pkgconfig/" || true
-          export PKG_CONFIG_PATH="$BUILD_PREFIX/lib/pkgconfig"
-          pkg-config --modversion x264 || echo "pkg-config cannot find x264"
-          pkg-config --cflags --libs x264 || true
-          pkg-config --static --cflags --libs x264 || true
-          
           PKG_CONFIG_PATH="$BUILD_PREFIX/lib/pkgconfig" \
           ./configure \
             --prefix="$BUILD_PREFIX" \
@@ -262,17 +251,6 @@ jobs:
           # Clean any previous build artifacts from cached source
           make distclean 2>/dev/null || true
           
-          # Debug pkg-config setup
-          echo "=== PKG_CONFIG_PATH Debug ==="
-          echo "PWD: $PWD"
-          echo "BUILD_PREFIX: $BUILD_PREFIX"
-          echo "PKG_CONFIG_PATH will be: $BUILD_PREFIX/lib/pkgconfig"
-          ls -la "$BUILD_PREFIX/lib/pkgconfig/" || true
-          export PKG_CONFIG_PATH="$BUILD_PREFIX/lib/pkgconfig"
-          pkg-config --modversion x264 || echo "pkg-config cannot find x264"
-          pkg-config --cflags --libs x264 || true
-          pkg-config --static --cflags --libs x264 || true
-          
           PKG_CONFIG_PATH="$BUILD_PREFIX/lib/pkgconfig" \
           ./configure \
             --prefix="$BUILD_PREFIX" \
@@ -300,22 +278,6 @@ jobs:
           cd "$GITHUB_WORKSPACE/ffmpeg-source"
           make -j$(nproc)
           make install
-      
-      - name: Debug directory structure
-        shell: bash
-        run: |
-          echo "=== Current directory ==="
-          pwd
-          echo ""
-          echo "=== Workspace contents ==="
-          ls -la
-          echo ""
-          echo "=== Parent directory contents ==="
-          ls -la ..
-          echo ""
-          echo "=== Looking for ffmpeg binary ==="
-          find . -name ffmpeg -type f 2>/dev/null || true
-          find .. -name ffmpeg -type f 2>/dev/null || true
       
       - name: Strip binary (Unix)
         if: runner.os != 'Windows'
