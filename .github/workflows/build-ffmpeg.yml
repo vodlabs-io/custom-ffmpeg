@@ -29,6 +29,51 @@ jobs:
             arch: x86_64
     
     runs-on: ${{ matrix.os }}
+    env:
+      FFMPEG_CONFIGURE_FLAGS: >-
+        --pkg-config-flags="--static"
+        --enable-gpl
+        --enable-libx264
+        --enable-static
+        --disable-shared
+        --disable-debug
+        --disable-doc
+        --disable-htmlpages
+        --disable-manpages
+        --disable-podpages
+        --disable-txtpages
+        --disable-network
+        --disable-autodetect
+        --disable-everything
+        --enable-protocol=file
+        --enable-protocol=pipe
+        --enable-protocol=http
+        --enable-protocol=https
+        --enable-protocol=tcp
+        --enable-demuxer=flv
+        --enable-demuxer=live_flv
+        --enable-demuxer=mpegts
+        --enable-demuxer=mov
+        --enable-demuxer=mp4
+        --enable-demuxer=hls
+        --enable-demuxer=concat
+        --enable-muxer=mp4
+        --enable-muxer=mpegts
+        --enable-decoder=h264
+        --enable-decoder=hevc
+        --enable-decoder=aac
+        --enable-decoder=mp3
+        --enable-encoder=libx264
+        --enable-encoder=aac
+        --enable-parser=h264
+        --enable-parser=hevc
+        --enable-parser=aac
+        --enable-parser=mpegaudio
+        --enable-bsf=h264_mp4toannexb
+        --enable-bsf=hevc_mp4toannexb
+        --enable-bsf=aac_adtstoasc
+        --enable-filter=null
+        --enable-filter=anull
     
     steps:
       - name: Checkout repository
@@ -192,51 +237,9 @@ jobs:
           PKG_CONFIG_PATH="$BUILD_PREFIX/lib/pkgconfig" \
           ./configure \
             --prefix="$BUILD_PREFIX" \
-            --pkg-config-flags="--static" \
-            --enable-gpl \
-            --enable-libx264 \
-            --enable-static \
-            --disable-shared \
-            --disable-debug \
-            --disable-doc \
-            --disable-htmlpages \
-            --disable-manpages \
-            --disable-podpages \
-            --disable-txtpages \
-            --disable-network \
-            --disable-autodetect \
-            --disable-everything \
-            --enable-protocol=file \
-            --enable-protocol=pipe \
-            --enable-protocol=http \
-            --enable-protocol=https \
-            --enable-protocol=tcp \
-            --enable-demuxer=flv \
-            --enable-demuxer=live_flv \
-            --enable-demuxer=mpegts \
-            --enable-demuxer=mov \
-            --enable-demuxer=mp4 \
-            --enable-demuxer=hls \
-            --enable-demuxer=concat \
-            --enable-muxer=mp4 \
-            --enable-muxer=mpegts \
-            --enable-decoder=h264 \
-            --enable-decoder=hevc \
-            --enable-decoder=aac \
-            --enable-decoder=mp3 \
-            --enable-encoder=libx264 \
-            --enable-encoder=aac \
-            --enable-parser=h264 \
-            --enable-parser=hevc \
-            --enable-parser=aac \
-            --enable-parser=mpegaudio \
-            --enable-bsf=h264_mp4toannexb \
-            --enable-bsf=hevc_mp4toannexb \
-            --enable-bsf=aac_adtstoasc \
-            --enable-filter=null \
-            --enable-filter=anull \
             --extra-cflags="-I$BUILD_PREFIX/include" \
             --extra-ldflags="-L$BUILD_PREFIX/lib" \
+            ${{ env.FFMPEG_CONFIGURE_FLAGS }} \
             --extra-libs="-lpthread -lm -ldl"
       
       - name: Configure minimal FFmpeg (Windows)
@@ -273,51 +276,9 @@ jobs:
           PKG_CONFIG_PATH="$BUILD_PREFIX/lib/pkgconfig" \
           ./configure \
             --prefix="$BUILD_PREFIX" \
-            --pkg-config-flags="--static" \
-            --enable-gpl \
-            --enable-libx264 \
-            --enable-static \
-            --disable-shared \
-            --disable-debug \
-            --disable-doc \
-            --disable-htmlpages \
-            --disable-manpages \
-            --disable-podpages \
-            --disable-txtpages \
-            --disable-network \
-            --disable-autodetect \
-            --disable-everything \
-            --enable-protocol=file \
-            --enable-protocol=pipe \
-            --enable-protocol=http \
-            --enable-protocol=https \
-            --enable-protocol=tcp \
-            --enable-demuxer=flv \
-            --enable-demuxer=live_flv \
-            --enable-demuxer=mpegts \
-            --enable-demuxer=mov \
-            --enable-demuxer=mp4 \
-            --enable-demuxer=hls \
-            --enable-demuxer=concat \
-            --enable-muxer=mp4 \
-            --enable-muxer=mpegts \
-            --enable-decoder=h264 \
-            --enable-decoder=hevc \
-            --enable-decoder=aac \
-            --enable-decoder=mp3 \
-            --enable-encoder=libx264 \
-            --enable-encoder=aac \
-            --enable-parser=h264 \
-            --enable-parser=hevc \
-            --enable-parser=aac \
-            --enable-parser=mpegaudio \
-            --enable-bsf=h264_mp4toannexb \
-            --enable-bsf=hevc_mp4toannexb \
-            --enable-bsf=aac_adtstoasc \
-            --enable-filter=null \
-            --enable-filter=anull \
             --extra-cflags="-I$BUILD_PREFIX/include" \
             --extra-ldflags="-L$BUILD_PREFIX/lib" \
+            ${{ env.FFMPEG_CONFIGURE_FLAGS }} \
             --extra-libs="-lpthread -lm"
       
       - name: Build FFmpeg (Unix)
