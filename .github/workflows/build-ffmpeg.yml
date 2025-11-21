@@ -2,10 +2,6 @@ name: Build Minimal FFmpeg
 
 on:
   workflow_dispatch:  # Manual trigger
-  push:
-    paths:
-      - '.github/workflows/build-ffmpeg.yml'
-      - 'ffmpeg/build-config.txt'
 
 jobs:
   build-ffmpeg:
