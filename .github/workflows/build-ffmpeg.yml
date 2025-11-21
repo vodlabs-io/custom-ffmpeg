@@ -1,0 +1,488 @@
+name: Build Minimal FFmpeg
+
+on:
+  workflow_dispatch:  # Manual trigger
+  push:
+    paths:
+      - '.github/workflows/build-ffmpeg.yml'
+      - 'ffmpeg/build-config.txt'
+
+jobs:
+  build-ffmpeg:
+    strategy:
+      matrix:
+        include:
+          - os: macos-15-intel
+            platform: darwin_amd64
+            arch: x86_64
+          - os: macos-15  # ARM M1 runner
+            platform: darwin_arm64
+            arch: arm64
+          - os: ubuntu-24.04
+            platform: linux_amd64
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            platform: linux_arm64
+            arch: aarch64
+          - os: windows-2025
+            platform: windows_amd64
+            arch: x86_64
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install build dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            yasm \
+            nasm \
+            pkg-config \
+            git
+      
+      - name: Install build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install yasm nasm pkg-config
+      
+      - name: Install build dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Install MSYS2 for Unix-like build environment
+          choco install -y msys2
+          
+          # Update MSYS2 and install required packages including nasm
+          C:\tools\msys64\usr\bin\bash.exe -lc "pacman -Syu --noconfirm"
+          C:\tools\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm base-devel mingw-w64-x86_64-toolchain nasm git"
+      
+      - name: Cache FFmpeg source
+        id: cache-ffmpeg-source
+        uses: actions/cache@v4
+        with:
+          path: ffmpeg-source
+          key: ffmpeg-source-8.0-${{ runner.os }}
+      
+      - name: Download FFmpeg source
+        if: steps.cache-ffmpeg-source.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          git clone --depth 1 --branch release/8.0 https://github.com/FFmpeg/FFmpeg.git ffmpeg-source
+      
+      - name: Verify FFmpeg source exists
+        shell: bash
+        run: |
+          if [ ! -d "ffmpeg-source" ]; then
+            echo "ERROR: ffmpeg-source directory not found!"
+            echo "Current directory: $(pwd)"
+            echo "Contents:"
+            ls -la
+            exit 1
+          fi
+          echo "ffmpeg-source directory found"
+      
+      - name: Cache x264 source
+        id: cache-x264-source
+        uses: actions/cache@v4
+        with:
+          path: x264-source
+          key: x264-source-${{ runner.os }}-${{ matrix.arch }}
+      
+      - name: Download x264 source
+        if: steps.cache-x264-source.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          git clone --depth 1 https://code.videolan.org/videolan/x264.git x264-source
+      
+      - name: Verify x264 source exists
+        shell: bash
+        run: |
+          if [ ! -d "x264-source" ]; then
+            echo "ERROR: x264-source directory not found!"
+            echo "Current directory: $(pwd)"
+            echo "Contents:"
+            ls -la
+            exit 1
+          fi
+          echo "x264-source directory found"
+      
+      - name: Build libx264 (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          # Use absolute path for prefix
+          BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
+          cd x264-source
+          
+          ./configure --prefix="$BUILD_PREFIX" \
+            --enable-static \
+            --enable-pic \
+            --disable-shared \
+            --disable-cli
+          
+          make clean
+          make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
+          make install
+          
+          # Verify installation
+          echo "=== Checking x264 installation ==="
+          ls -la "$BUILD_PREFIX/lib/" || true
+          ls -la "$BUILD_PREFIX/lib/pkgconfig/" || true
+          cat "$BUILD_PREFIX/lib/pkgconfig/x264.pc" || true
+      
+      - name: Build libx264 (Windows)
+        if: runner.os == 'Windows'
+        shell: C:\tools\msys64\usr\bin\bash.exe -leo pipefail {0}
+        env:
+          MSYSTEM: MINGW64
+          CHERE_INVOKING: 1
+        run: |
+          # Use GitHub Actions workspace path
+          cd "$GITHUB_WORKSPACE"
+          echo "Working directory: $(pwd)"
+          
+          # Use absolute path for prefix
+          BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
+          
+          # Navigate to x264 source
+          cd x264-source
+          
+          ./configure --prefix="$BUILD_PREFIX" \
+            --enable-static \
+            --enable-pic \
+            --disable-shared \
+            --disable-cli
+          
+          make -j$(nproc)
+          make install
+          
+          # Verify installation
+          echo "=== Checking x264 installation ==="
+          ls -la "$BUILD_PREFIX/lib/" || true
+          ls -la "$BUILD_PREFIX/lib/pkgconfig/" || true
+          cat "$BUILD_PREFIX/lib/pkgconfig/x264.pc" || true
+      
+      - name: Configure minimal FFmpeg (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          # Use absolute paths
+          BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
+          cd ffmpeg-source
+          
+          # Clean any previous build artifacts from cached source
+          make distclean 2>/dev/null || true
+          
+          # Debug pkg-config setup
+          echo "=== PKG_CONFIG_PATH Debug ==="
+          echo "PWD: $PWD"
+          echo "BUILD_PREFIX: $BUILD_PREFIX"
+          echo "PKG_CONFIG_PATH will be: $BUILD_PREFIX/lib/pkgconfig"
+          ls -la "$BUILD_PREFIX/lib/pkgconfig/" || true
+          export PKG_CONFIG_PATH="$BUILD_PREFIX/lib/pkgconfig"
+          pkg-config --modversion x264 || echo "pkg-config cannot find x264"
+          pkg-config --cflags --libs x264 || true
+          pkg-config --static --cflags --libs x264 || true
+          
+          PKG_CONFIG_PATH="$BUILD_PREFIX/lib/pkgconfig" \
+          ./configure \
+            --prefix="$BUILD_PREFIX" \
+            --pkg-config-flags="--static" \
+            --enable-gpl \
+            --enable-libx264 \
+            --enable-static \
+            --disable-shared \
+            --disable-debug \
+            --disable-doc \
+            --disable-htmlpages \
+            --disable-manpages \
+            --disable-podpages \
+            --disable-txtpages \
+            --disable-network \
+            --disable-autodetect \
+            --disable-everything \
+            --enable-protocol=file \
+            --enable-protocol=pipe \
+            --enable-protocol=http \
+            --enable-protocol=https \
+            --enable-protocol=tcp \
+            --enable-demuxer=flv \
+            --enable-demuxer=live_flv \
+            --enable-demuxer=mpegts \
+            --enable-demuxer=mov \
+            --enable-demuxer=mp4 \
+            --enable-demuxer=hls \
+            --enable-demuxer=concat \
+            --enable-muxer=mp4 \
+            --enable-muxer=mpegts \
+            --enable-decoder=h264 \
+            --enable-decoder=hevc \
+            --enable-decoder=aac \
+            --enable-decoder=mp3 \
+            --enable-encoder=libx264 \
+            --enable-encoder=aac \
+            --enable-parser=h264 \
+            --enable-parser=hevc \
+            --enable-parser=aac \
+            --enable-parser=mpegaudio \
+            --enable-bsf=h264_mp4toannexb \
+            --enable-bsf=hevc_mp4toannexb \
+            --enable-bsf=aac_adtstoasc \
+            --enable-filter=null \
+            --enable-filter=anull \
+            --extra-cflags="-I$BUILD_PREFIX/include" \
+            --extra-ldflags="-L$BUILD_PREFIX/lib" \
+            --extra-libs="-lpthread -lm -ldl"
+      
+      - name: Configure minimal FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        shell: C:\tools\msys64\usr\bin\bash.exe -leo pipefail {0}
+        env:
+          MSYSTEM: MINGW64
+          CHERE_INVOKING: 1
+        run: |
+          # Use GitHub Actions workspace path
+          cd "$GITHUB_WORKSPACE"
+          echo "Working directory: $(pwd)"
+          
+          # Use absolute paths
+          BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
+          
+          # Navigate to ffmpeg source
+          cd ffmpeg-source
+          
+          # Clean any previous build artifacts from cached source
+          make distclean 2>/dev/null || true
+          
+          # Debug pkg-config setup
+          echo "=== PKG_CONFIG_PATH Debug ==="
+          echo "PWD: $PWD"
+          echo "BUILD_PREFIX: $BUILD_PREFIX"
+          echo "PKG_CONFIG_PATH will be: $BUILD_PREFIX/lib/pkgconfig"
+          ls -la "$BUILD_PREFIX/lib/pkgconfig/" || true
+          export PKG_CONFIG_PATH="$BUILD_PREFIX/lib/pkgconfig"
+          pkg-config --modversion x264 || echo "pkg-config cannot find x264"
+          pkg-config --cflags --libs x264 || true
+          pkg-config --static --cflags --libs x264 || true
+          
+          PKG_CONFIG_PATH="$BUILD_PREFIX/lib/pkgconfig" \
+          ./configure \
+            --prefix="$BUILD_PREFIX" \
+            --pkg-config-flags="--static" \
+            --enable-gpl \
+            --enable-libx264 \
+            --enable-static \
+            --disable-shared \
+            --disable-debug \
+            --disable-doc \
+            --disable-htmlpages \
+            --disable-manpages \
+            --disable-podpages \
+            --disable-txtpages \
+            --disable-network \
+            --disable-autodetect \
+            --disable-everything \
+            --enable-protocol=file \
+            --enable-protocol=pipe \
+            --enable-protocol=http \
+            --enable-protocol=https \
+            --enable-protocol=tcp \
+            --enable-demuxer=flv \
+            --enable-demuxer=live_flv \
+            --enable-demuxer=mpegts \
+            --enable-demuxer=mov \
+            --enable-demuxer=mp4 \
+            --enable-demuxer=hls \
+            --enable-demuxer=concat \
+            --enable-muxer=mp4 \
+            --enable-muxer=mpegts \
+            --enable-decoder=h264 \
+            --enable-decoder=hevc \
+            --enable-decoder=aac \
+            --enable-decoder=mp3 \
+            --enable-encoder=libx264 \
+            --enable-encoder=aac \
+            --enable-parser=h264 \
+            --enable-parser=hevc \
+            --enable-parser=aac \
+            --enable-parser=mpegaudio \
+            --enable-bsf=h264_mp4toannexb \
+            --enable-bsf=hevc_mp4toannexb \
+            --enable-bsf=aac_adtstoasc \
+            --enable-filter=null \
+            --enable-filter=anull \
+            --extra-cflags="-I$BUILD_PREFIX/include" \
+            --extra-ldflags="-L$BUILD_PREFIX/lib" \
+            --extra-libs="-lpthread -lm"
+      
+      - name: Build FFmpeg (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cd ffmpeg-source
+          make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
+          make install
+      
+      - name: Build FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        shell: C:\tools\msys64\usr\bin\bash.exe -leo pipefail {0}
+        env:
+          MSYSTEM: MINGW64
+          CHERE_INVOKING: 1
+        run: |
+          # Use GitHub Actions workspace path
+          cd "$GITHUB_WORKSPACE/ffmpeg-source"
+          make -j$(nproc)
+          make install
+      
+      - name: Debug directory structure
+        shell: bash
+        run: |
+          echo "=== Current directory ==="
+          pwd
+          echo ""
+          echo "=== Workspace contents ==="
+          ls -la
+          echo ""
+          echo "=== Parent directory contents ==="
+          ls -la ..
+          echo ""
+          echo "=== Looking for ffmpeg binary ==="
+          find . -name ffmpeg -type f 2>/dev/null || true
+          find .. -name ffmpeg -type f 2>/dev/null || true
+      
+      - name: Strip binary (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
+          strip "$BUILD_PREFIX/bin/ffmpeg"
+      
+      - name: Strip binary (Windows)
+        if: runner.os == 'Windows'
+        shell: C:\tools\msys64\usr\bin\bash.exe -leo pipefail {0}
+        env:
+          MSYSTEM: MINGW64
+          CHERE_INVOKING: 1
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
+          strip "$BUILD_PREFIX/bin/ffmpeg.exe"
+      
+      - name: Display binary size and test
+        shell: bash
+        run: |
+          BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
+          echo "=== Binary Size ==="
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            ls -lh "$BUILD_PREFIX/bin/ffmpeg.exe"
+            echo ""
+            echo "=== Version Info ==="
+            "$BUILD_PREFIX/bin/ffmpeg.exe" -version || true
+          else
+            ls -lh "$BUILD_PREFIX/bin/ffmpeg"
+            echo ""
+            echo "=== Version Info ==="
+            "$BUILD_PREFIX/bin/ffmpeg" -version || true
+          fi
+      
+      - name: Package binary
+        shell: bash
+        run: |
+          BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
+          mkdir -p release/${{ matrix.platform }}
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "$BUILD_PREFIX/bin/ffmpeg.exe" release/${{ matrix.platform }}/
+            cd release
+            tar czf ffmpeg-${{ matrix.platform }}.tar.gz ${{ matrix.platform }}/ffmpeg.exe
+          else
+            cp "$BUILD_PREFIX/bin/ffmpeg" release/${{ matrix.platform }}/
+            cd release
+            tar czf ffmpeg-${{ matrix.platform }}.tar.gz ${{ matrix.platform }}/ffmpeg
+          fi
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-${{ matrix.platform }}
+          path: release/ffmpeg-${{ matrix.platform }}.tar.gz
+          retention-days: 90
+
+  create-release:
+    needs: build-ffmpeg
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: List artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find artifacts -type f
+      
+      - name: Create release bundle
+        run: |
+          mkdir -p release-bundle
+          cp artifacts/ffmpeg-*/ffmpeg-*.tar.gz release-bundle/
+          cd release-bundle
+          ls -lh
+      
+      - name: Generate release notes
+        run: |
+          cat > release-notes.md << 'EOF'
+          # Minimal FFmpeg Binaries
+          
+          Custom-built minimal FFmpeg binaries optimized for live stream recording and post-processing.
+          
+          ## Included Features
+          - Protocols: file, pipe, http, https, tcp
+          - Demuxers: FLV, live_flv, MPEGTS, MOV, MP4, HLS, concat
+          - Muxers: MP4, MPEGTS
+          - Decoders: H.264, HEVC, AAC, MP3
+          - Encoders: libx264, AAC
+          - Parsers: H.264, HEVC, AAC, MPEG audio
+          - BSF: h264_mp4toannexb, hevc_mp4toannexb, aac_adtstoasc
+          - Filters: null, anull
+          
+          ## Binary Sizes
+          Approximate sizes (after stripping):
+          - darwin_amd64: 10-15 MB
+          - darwin_arm64: 10-15 MB
+          - linux_amd64: 12-18 MB
+          - linux_arm64: 12-18 MB
+          - windows_amd64: 15-20 MB
+          
+          ## Usage
+          Download the appropriate binary for your platform and extract it to `ffmpeg/bin/<platform>/`.
+          
+          ## Build Information
+          - FFmpeg version: 8.0
+          - Build date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          - Repository: ${{ github.repository }}
+          - Commit: ${{ github.sha }}
+          EOF
+          
+          cat release-notes.md
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ffmpeg-${{ github.run_number }}-${{ github.run_attempt }}
+          name: FFmpeg Build ${{ github.run_number }}
+          body_path: release-notes.md
+          files: release-bundle/ffmpeg-*.tar.gz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
