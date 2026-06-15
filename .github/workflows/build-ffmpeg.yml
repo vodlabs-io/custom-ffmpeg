@@ -248,11 +248,15 @@ jobs:
           # Clean any previous build artifacts from cached source
           make distclean 2>/dev/null || true
           
+          # -static forces MinGW to link winpthread, iconv, zlib and libgcc
+          # from their .a archives instead of DLLs, producing a fully
+          # self-contained ffmpeg.exe (no libwinpthread-1.dll / libiconv-2.dll
+          # / zlib1.dll at runtime, which would otherwise fail with 0xc0000135).
           PKG_CONFIG_PATH="$BUILD_PREFIX/lib/pkgconfig" \
           ./configure \
             --prefix="$BUILD_PREFIX" \
             --extra-cflags="-I$BUILD_PREFIX/include" \
-            --extra-ldflags="-L$BUILD_PREFIX/lib" \
+            --extra-ldflags="-L$BUILD_PREFIX/lib -static" \
             ${{ env.FFMPEG_CONFIGURE_FLAGS }} \
             --extra-libs="-lpthread -lm"
       
