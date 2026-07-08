@@ -58,6 +58,10 @@ jobs:
         --enable-bsf=aac_adtstoasc
         --enable-filter=null
         --enable-filter=anull
+        --enable-encoder=mjpeg
+        --enable-muxer=image2
+        --enable-filter=scale,format
+        --enable-swscale
     
     steps:
       - name: Checkout repository
