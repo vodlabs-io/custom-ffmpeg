@@ -106,6 +106,7 @@ jobs:
         --enable-indev=lavfi
         --enable-muxer=null
         --enable-filter=pad,setsar,aresample,aformat,concat,testsrc
+        --enable-decoder=wrapped_avframe
     
     steps:
       - name: Checkout repository
@@ -458,6 +459,33 @@ jobs:
           echo ""
           echo "=== H.264 encoders present ==="
           "$BUILD_PREFIX/bin/ffmpeg$EXT" -hide_banner -encoders 2>/dev/null | grep -Ei 'h264|264' || true
+
+      # Runs the recorder's exact merge-path commands with the software
+      # encoder (CI runners have no GPU). Both MUST succeed — a build that
+      # passes -version but fails these would break every merge at runtime
+      # (e.g. the lavfi self-test needs the wrapped_avframe decoder, which
+      # --disable-everything silently drops).
+      - name: Smoke-test merge path
+        shell: bash
+        run: |
+          BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
+          EXT=""
+          if [ "${{ runner.os }}" = "Windows" ]; then EXT=".exe"; fi
+          FF="$BUILD_PREFIX/bin/ffmpeg$EXT"
+
+          echo "=== encoder self-test (lavfi testsrc -> libx264 -> null) ==="
+          "$FF" -hide_banner -loglevel error \
+            -f lavfi -i "testsrc=size=1920x1080:rate=30:duration=1" \
+            -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -f null -
+
+          echo "=== mixed-resolution concat graph (scale/pad/setsar/format/concat) ==="
+          "$FF" -hide_banner -loglevel error \
+            -f lavfi -i "testsrc=size=640x360:rate=30:duration=1" \
+            -f lavfi -i "testsrc=size=320x240:rate=30:duration=1" \
+            -filter_complex "[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p[v0];[1:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p[v1];[v0][v1]concat=n=2:v=1:a=0[outv]" \
+            -map "[outv]" -c:v libx264 -preset ultrafast -crf 30 -f null -
+
+          echo "Merge-path smoke test passed"
 
       - name: Package binaries
         shell: bash
