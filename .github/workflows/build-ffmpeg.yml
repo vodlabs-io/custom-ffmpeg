@@ -6,23 +6,63 @@ on:
 jobs:
   build-ffmpeg:
     strategy:
+      fail-fast: false
       matrix:
         include:
+          # hw_flags: per-platform hardware H.264 encoder configure flags.
+          # nvcodec/amf/libvpl toggle the matching pre-configure dependency
+          # steps below (mediafoundation/videotoolbox need no external deps).
+          # extra_libs_hw: extra linker libs the hardware deps pull in (libvpl
+          # is C++, so it needs libstdc++).
           - os: macos-15-intel
             platform: darwin_amd64
             arch: x86_64
+            hw_flags: >-
+              --enable-videotoolbox
+              --enable-encoder=h264_videotoolbox
           - os: macos-15
             platform: darwin_arm64
             arch: arm64
+            hw_flags: >-
+              --enable-videotoolbox
+              --enable-encoder=h264_videotoolbox
           - os: ubuntu-24.04
             platform: linux_amd64
             arch: x86_64
+            nvcodec: true
+            amf: true
+            libvpl: true
+            extra_libs_hw: "-lstdc++"
+            hw_flags: >-
+              --enable-ffnvcodec
+              --enable-encoder=h264_nvenc
+              --enable-amf
+              --enable-encoder=h264_amf
+              --enable-libvpl
+              --enable-encoder=h264_qsv
           - os: ubuntu-24.04-arm
             platform: linux_arm64
             arch: aarch64
+            nvcodec: true
+            hw_flags: >-
+              --enable-ffnvcodec
+              --enable-encoder=h264_nvenc
           - os: windows-2025
             platform: windows_amd64
             arch: x86_64
+            nvcodec: true
+            amf: true
+            libvpl: true
+            extra_libs_hw: "-lstdc++"
+            hw_flags: >-
+              --enable-ffnvcodec
+              --enable-encoder=h264_nvenc
+              --enable-amf
+              --enable-encoder=h264_amf
+              --enable-libvpl
+              --enable-encoder=h264_qsv
+              --enable-mediafoundation
+              --enable-encoder=h264_mf
     
     runs-on: ${{ matrix.os }}
     env:
@@ -62,6 +102,10 @@ jobs:
         --enable-muxer=image2
         --enable-filter=scale,format
         --enable-swscale
+        --enable-swresample
+        --enable-indev=lavfi
+        --enable-muxer=null
+        --enable-filter=pad,setsar,aresample,aformat,concat,testsrc
     
     steps:
       - name: Checkout repository
@@ -76,6 +120,7 @@ jobs:
             yasm \
             nasm \
             pkg-config \
+            cmake \
             git
       
       - name: Install build dependencies (macOS)
@@ -92,7 +137,7 @@ jobs:
           
           # Update MSYS2 and install required packages including nasm
           C:\tools\msys64\usr\bin\bash.exe -lc "pacman -Syu --noconfirm"
-          C:\tools\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm base-devel mingw-w64-x86_64-toolchain nasm git"
+          C:\tools\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm base-devel mingw-w64-x86_64-toolchain nasm git mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja"
       
       - name: Get latest FFmpeg release
         id: ffmpeg-version
@@ -212,7 +257,97 @@ jobs:
           ls -la "$BUILD_PREFIX/lib/" || true
           ls -la "$BUILD_PREFIX/lib/pkgconfig/" || true
           cat "$BUILD_PREFIX/lib/pkgconfig/x264.pc" || true
-      
+
+      # --- Hardware-encoder dependencies (header/lib only; the encoders
+      # themselves dlopen the vendor runtime at execution time, so a build
+      # host without the GPU still produces a working binary). ---
+
+      - name: Build nv-codec-headers (Unix)
+        if: runner.os != 'Windows' && matrix.nvcodec
+        shell: bash
+        run: |
+          BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
+          git clone --depth 1 https://github.com/FFmpeg/nv-codec-headers.git nv-codec-headers
+          make -C nv-codec-headers PREFIX="$BUILD_PREFIX" install
+          cat "$BUILD_PREFIX/lib/pkgconfig/ffnvcodec.pc" || true
+
+      - name: Build nv-codec-headers (Windows)
+        if: runner.os == 'Windows' && matrix.nvcodec
+        shell: C:\tools\msys64\usr\bin\bash.exe -leo pipefail {0}
+        env:
+          MSYSTEM: MINGW64
+          CHERE_INVOKING: 1
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
+          git clone --depth 1 https://github.com/FFmpeg/nv-codec-headers.git nv-codec-headers
+          make -C nv-codec-headers PREFIX="$BUILD_PREFIX" install
+          cat "$BUILD_PREFIX/lib/pkgconfig/ffnvcodec.pc" || true
+
+      - name: Install AMF headers (Unix)
+        if: runner.os != 'Windows' && matrix.amf
+        shell: bash
+        run: |
+          BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
+          git clone --depth 1 https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git amf-source
+          mkdir -p "$BUILD_PREFIX/include/AMF"
+          cp -r amf-source/amf/public/include/* "$BUILD_PREFIX/include/AMF/"
+          ls "$BUILD_PREFIX/include/AMF/core/Version.h"
+
+      - name: Install AMF headers (Windows)
+        if: runner.os == 'Windows' && matrix.amf
+        shell: C:\tools\msys64\usr\bin\bash.exe -leo pipefail {0}
+        env:
+          MSYSTEM: MINGW64
+          CHERE_INVOKING: 1
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
+          git clone --depth 1 https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git amf-source
+          mkdir -p "$BUILD_PREFIX/include/AMF"
+          cp -r amf-source/amf/public/include/* "$BUILD_PREFIX/include/AMF/"
+          ls "$BUILD_PREFIX/include/AMF/core/Version.h"
+
+      - name: Build libvpl (Unix)
+        if: runner.os != 'Windows' && matrix.libvpl
+        shell: bash
+        run: |
+          BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
+          git clone --depth 1 --branch v2.13.0 https://github.com/intel/libvpl.git libvpl-source
+          cd libvpl-source
+          cmake -B build \
+            -DCMAKE_INSTALL_PREFIX="$BUILD_PREFIX" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DINSTALL_EXAMPLE_CODE=OFF
+          cmake --build build --config Release -j
+          cmake --install build
+          cat "$BUILD_PREFIX/lib/pkgconfig/vpl.pc" || true
+
+      - name: Build libvpl (Windows)
+        if: runner.os == 'Windows' && matrix.libvpl
+        shell: C:\tools\msys64\usr\bin\bash.exe -leo pipefail {0}
+        env:
+          MSYSTEM: MINGW64
+          CHERE_INVOKING: 1
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
+          git clone --depth 1 --branch v2.13.0 https://github.com/intel/libvpl.git libvpl-source
+          cd libvpl-source
+          cmake -G Ninja -B build \
+            -DCMAKE_INSTALL_PREFIX="$BUILD_PREFIX" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DINSTALL_EXAMPLE_CODE=OFF
+          cmake --build build -j
+          cmake --install build
+          cat "$BUILD_PREFIX/lib/pkgconfig/vpl.pc" || true
+
       - name: Configure minimal FFmpeg (Unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -230,7 +365,8 @@ jobs:
             --extra-cflags="-I$BUILD_PREFIX/include" \
             --extra-ldflags="-L$BUILD_PREFIX/lib" \
             ${{ env.FFMPEG_CONFIGURE_FLAGS }} \
-            --extra-libs="-lpthread -lm -ldl"
+            ${{ matrix.hw_flags }} \
+            --extra-libs="-lpthread -lm -ldl ${{ matrix.extra_libs_hw }}"
       
       - name: Configure minimal FFmpeg (Windows)
         if: runner.os == 'Windows'
@@ -262,7 +398,8 @@ jobs:
             --extra-cflags="-I$BUILD_PREFIX/include" \
             --extra-ldflags="-L$BUILD_PREFIX/lib -static" \
             ${{ env.FFMPEG_CONFIGURE_FLAGS }} \
-            --extra-libs="-lpthread -lm"
+            ${{ matrix.hw_flags }} \
+            --extra-libs="-lpthread -lm ${{ matrix.extra_libs_hw }}"
       
       - name: Build FFmpeg (Unix)
         if: runner.os != 'Windows'
@@ -284,14 +421,15 @@ jobs:
           make -j$(nproc)
           make install
       
-      - name: Strip binary (Unix)
+      - name: Strip binaries (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
           strip "$BUILD_PREFIX/bin/ffmpeg"
-      
-      - name: Strip binary (Windows)
+          strip "$BUILD_PREFIX/bin/ffprobe"
+
+      - name: Strip binaries (Windows)
         if: runner.os == 'Windows'
         shell: C:\tools\msys64\usr\bin\bash.exe -leo pipefail {0}
         env:
@@ -301,38 +439,39 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
           strip "$BUILD_PREFIX/bin/ffmpeg.exe"
-      
-      - name: Display binary size and test
+          strip "$BUILD_PREFIX/bin/ffprobe.exe"
+
+      - name: Display binary sizes, encoders and test
         shell: bash
         run: |
           BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
-          echo "=== Binary Size ==="
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            ls -lh "$BUILD_PREFIX/bin/ffmpeg.exe"
-            echo ""
-            echo "=== Version Info ==="
-            "$BUILD_PREFIX/bin/ffmpeg.exe" -version || true
-          else
-            ls -lh "$BUILD_PREFIX/bin/ffmpeg"
-            echo ""
-            echo "=== Version Info ==="
-            "$BUILD_PREFIX/bin/ffmpeg" -version || true
-          fi
-      
-      - name: Package binary
+          EXT=""
+          if [ "${{ runner.os }}" = "Windows" ]; then EXT=".exe"; fi
+          echo "=== Binary Sizes ==="
+          ls -lh "$BUILD_PREFIX/bin/ffmpeg$EXT" "$BUILD_PREFIX/bin/ffprobe$EXT"
+          echo ""
+          echo "=== ffmpeg version ==="
+          "$BUILD_PREFIX/bin/ffmpeg$EXT" -version || true
+          echo ""
+          echo "=== ffprobe version ==="
+          "$BUILD_PREFIX/bin/ffprobe$EXT" -version || true
+          echo ""
+          echo "=== H.264 encoders present ==="
+          "$BUILD_PREFIX/bin/ffmpeg$EXT" -hide_banner -encoders 2>/dev/null | grep -Ei 'h264|264' || true
+
+      - name: Package binaries
         shell: bash
         run: |
           BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
           mkdir -p release/${{ matrix.platform }}
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cp "$BUILD_PREFIX/bin/ffmpeg.exe" release/${{ matrix.platform }}/
-            cd release
-            tar czf ffmpeg-${{ matrix.platform }}.tar.gz ${{ matrix.platform }}/ffmpeg.exe
-          else
-            cp "$BUILD_PREFIX/bin/ffmpeg" release/${{ matrix.platform }}/
-            cd release
-            tar czf ffmpeg-${{ matrix.platform }}.tar.gz ${{ matrix.platform }}/ffmpeg
-          fi
+          EXT=""
+          if [ "${{ runner.os }}" = "Windows" ]; then EXT=".exe"; fi
+          cp "$BUILD_PREFIX/bin/ffmpeg$EXT" release/${{ matrix.platform }}/
+          cp "$BUILD_PREFIX/bin/ffprobe$EXT" release/${{ matrix.platform }}/
+          cd release
+          tar czf ffmpeg-${{ matrix.platform }}.tar.gz \
+            ${{ matrix.platform }}/ffmpeg$EXT \
+            ${{ matrix.platform }}/ffprobe$EXT
       
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -371,7 +510,12 @@ jobs:
         with:
           tag_name: ffmpeg-${{ github.run_number }}-${{ github.run_attempt }}
           name: FFmpeg Build ${{ github.run_number }}
-          body_path: release-notes.md
+          body: |
+            Minimal FFmpeg + ffprobe builds for VodLabs Recorder.
+            Each `ffmpeg-<platform>.tar.gz` contains both `ffmpeg` and
+            `ffprobe` (H.264 hardware encoders where the platform supports
+            them, libx264 fallback everywhere). Consumed by the recorder's
+            `internal/ffmpeg/download.sh`.
           files: release-bundle/ffmpeg-*.tar.gz
           draft: false
           prerelease: false
