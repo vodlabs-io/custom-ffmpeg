@@ -66,6 +66,14 @@ jobs:
     
     runs-on: ${{ matrix.os }}
     env:
+      # The h264/hevc demuxers are enabled for their probe functions, not to
+      # open raw files. A transport stream may declare a PID with no usable
+      # stream type (bigo's TS carries H.264 as codec_tag 0x0000), leaving
+      # avformat to identify it by probing -- and set_codec_from_probe_data()
+      # only recognises a codec whose demuxer is compiled in. Without them the
+      # track stays "Unknown: none" and is dropped from the merge, producing an
+      # audio-only VOD; audio survives only because the aac demuxer is already
+      # pulled in. Keep them in step with the enabled video decoders.
       FFMPEG_CONFIGURE_FLAGS: >-
         --pkg-config-flags="--static"
         --enable-gpl
@@ -81,6 +89,8 @@ jobs:
         --enable-demuxer=mp4
         --enable-demuxer=hls
         --enable-demuxer=concat
+        --enable-demuxer=h264
+        --enable-demuxer=hevc
         --enable-muxer=mp4
         --enable-muxer=mpegts
         --enable-decoder=h264
