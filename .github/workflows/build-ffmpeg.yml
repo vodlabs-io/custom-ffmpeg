@@ -74,6 +74,13 @@ jobs:
       # track stays "Unknown: none" and is dropped from the merge, producing an
       # audio-only VOD; audio survives only because the aac demuxer is already
       # pulled in. Keep them in step with the enabled video decoders.
+      #
+      # eq applies the pre-encode dither that keeps flat gradients from banding
+      # when parts are re-encoded onto a common canvas; sendcmd drives it from a
+      # timed script.
+      #
+      # This is a folded scalar: every line below is joined into one shell word
+      # list, so a "#" here would comment out the rest of the command line.
       FFMPEG_CONFIGURE_FLAGS: >-
         --pkg-config-flags="--static"
         --enable-gpl
@@ -116,9 +123,6 @@ jobs:
         --enable-indev=lavfi
         --enable-muxer=null
         --enable-filter=pad,setsar,aresample,aformat,concat,testsrc
-        # eq applies the pre-encode dither that keeps flat gradients from
-        # banding when parts are re-encoded onto a common canvas; sendcmd
-        # drives it from a timed script.
         --enable-filter=eq,sendcmd
         --enable-decoder=wrapped_avframe
     
