@@ -116,6 +116,10 @@ jobs:
         --enable-indev=lavfi
         --enable-muxer=null
         --enable-filter=pad,setsar,aresample,aformat,concat,testsrc
+        # eq applies the pre-encode dither that keeps flat gradients from
+        # banding when parts are re-encoded onto a common canvas; sendcmd
+        # drives it from a timed script.
+        --enable-filter=eq,sendcmd
         --enable-decoder=wrapped_avframe
     
     steps:
@@ -494,6 +498,14 @@ jobs:
             -f lavfi -i "testsrc=size=320x240:rate=30:duration=1" \
             -filter_complex "[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p[v0];[1:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p[v1];[v0][v1]concat=n=2:v=1:a=0[outv]" \
             -map "[outv]" -c:v libx264 -preset ultrafast -crf 30 -f null -
+
+          echo "=== timed dither graph (sendcmd driving eq) ==="
+          printf '0.0 eq brightness 0.006;\n0.1 eq brightness -0.006;\n' > dither.txt
+          "$FF" -hide_banner -loglevel error \
+            -f lavfi -i "testsrc=size=640x360:rate=30:duration=1" \
+            -vf "sendcmd=f=dither.txt,eq=brightness=0" \
+            -c:v libx264 -preset ultrafast -crf 30 -f null -
+          rm -f dither.txt
 
           echo "Merge-path smoke test passed"
 
