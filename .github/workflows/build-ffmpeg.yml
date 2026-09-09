@@ -47,20 +47,21 @@ jobs:
             hw_flags: >-
               --enable-ffnvcodec
               --enable-encoder=h264_nvenc
+          # No libvpl here: its Windows dispatcher stopped compiling against the
+          # runner's MinGW headers (stralign.h). Intel GPUs are still covered on
+          # Windows by MediaFoundation, which is the platform-native path for
+          # them, so dropping QSV costs no hardware support. Linux keeps it.
           - os: windows-2025
             platform: windows_amd64
             arch: x86_64
             nvcodec: true
             amf: true
-            libvpl: true
             extra_libs_hw: "-lstdc++"
             hw_flags: >-
               --enable-ffnvcodec
               --enable-encoder=h264_nvenc
               --enable-amf
               --enable-encoder=h264_amf
-              --enable-libvpl
-              --enable-encoder=h264_qsv
               --enable-mediafoundation
               --enable-encoder=h264_mf
     
