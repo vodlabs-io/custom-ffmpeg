@@ -76,9 +76,8 @@ jobs:
       # audio-only VOD; audio survives only because the aac demuxer is already
       # pulled in. Keep them in step with the enabled video decoders.
       #
-      # eq applies the pre-encode dither that keeps flat gradients from banding
-      # when parts are re-encoded onto a common canvas; sendcmd drives it from a
-      # timed script.
+      # eq applies the recorder's timed brightness offsets when parts are
+      # re-encoded onto a common canvas; sendcmd drives it from a script.
       #
       # This is a folded scalar: every line below is joined into one shell word
       # list, so a "#" here would comment out the rest of the command line.
