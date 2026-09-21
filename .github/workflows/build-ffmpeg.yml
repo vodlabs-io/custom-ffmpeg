@@ -3,6 +3,14 @@ name: Build Minimal FFmpeg
 on:
   workflow_dispatch:  # Manual trigger
 
+env:
+  # Pinned so every build (and the source offer it ships with) is
+  # reproducible and traceable to an exact upstream revision, instead of
+  # whatever "latest" resolved to on build day. Bump deliberately, in a
+  # commit that names the new tag/commit.
+  FFMPEG_TAG: n9.0.2
+  X264_COMMIT: b35605ace3ddf7c1a5d67a2eb553f034aef41d55 # videolan/x264 stable branch
+
 jobs:
   build-ffmpeg:
     strategy:
@@ -158,31 +166,18 @@ jobs:
           C:\tools\msys64\usr\bin\bash.exe -lc "pacman -Syu --noconfirm"
           C:\tools\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm base-devel mingw-w64-x86_64-toolchain nasm git mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja"
       
-      - name: Get latest FFmpeg release
-        id: ffmpeg-version
-        shell: bash
-        run: |
-          # Fetch the latest stable release tag from FFmpeg repository
-          LATEST_TAG=$(git ls-remote --tags --refs --sort='v:refname' https://github.com/FFmpeg/FFmpeg.git | grep -E 'refs/tags/n[0-9]+\.[0-9]+(\.[0-9]+)?$' | tail -n1 | sed 's/.*\///')
-          echo "Latest FFmpeg tag: $LATEST_TAG"
-          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-          
-          # Extract version for cache key (e.g., n7.1 -> 7.1)
-          VERSION=$(echo "$LATEST_TAG" | sed 's/^n//')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-      
       - name: Cache FFmpeg source
         id: cache-ffmpeg-source
         uses: actions/cache@v6
         with:
           path: ffmpeg-source
-          key: ffmpeg-source-${{ steps.ffmpeg-version.outputs.version }}-${{ runner.os }}
-      
+          key: ffmpeg-source-${{ env.FFMPEG_TAG }}-${{ runner.os }}
+
       - name: Download FFmpeg source
         if: steps.cache-ffmpeg-source.outputs.cache-hit != 'true'
         shell: bash
         run: |
-          git clone --depth 1 --branch ${{ steps.ffmpeg-version.outputs.tag }} https://github.com/FFmpeg/FFmpeg.git ffmpeg-source
+          git clone --depth 1 --branch ${{ env.FFMPEG_TAG }} https://github.com/FFmpeg/FFmpeg.git ffmpeg-source
       
       - name: Verify FFmpeg source exists
         shell: bash
@@ -201,13 +196,20 @@ jobs:
         uses: actions/cache@v6
         with:
           path: x264-source
-          key: x264-source-${{ runner.os }}-${{ matrix.arch }}
-      
+          key: x264-source-${{ env.X264_COMMIT }}-${{ runner.os }}-${{ matrix.arch }}
+
       - name: Download x264 source
         if: steps.cache-x264-source.outputs.cache-hit != 'true'
         shell: bash
         run: |
-          git clone --depth 1 https://code.videolan.org/videolan/x264.git x264-source
+          # videolan.org allows fetching an arbitrary commit directly (verified:
+          # it's not restricted to refs), so this pins the exact revision
+          # without cloning full history.
+          mkdir x264-source && cd x264-source
+          git init -q
+          git remote add origin https://code.videolan.org/videolan/x264.git
+          git fetch --depth 1 origin ${{ env.X264_COMMIT }}
+          git checkout -q FETCH_HEAD
       
       - name: Verify x264 source exists
         shell: bash
