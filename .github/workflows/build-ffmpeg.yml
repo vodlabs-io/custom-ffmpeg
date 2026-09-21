@@ -528,51 +528,154 @@ jobs:
           tar czf ffmpeg-${{ matrix.platform }}.tar.gz \
             ${{ matrix.platform }}/ffmpeg$EXT \
             ${{ matrix.platform }}/ffprobe$EXT
-      
+
+      # Kept as a separate, unpinned-by-checksum asset from the runtime
+      # tarball above (GPLv2 3(b)'s "written offer" needs to accompany the
+      # binary, not be baked into the exact bytes the recorder verifies).
+      - name: Write GPL source-offer notice
+        shell: bash
+        run: |
+          EXTRA_LIBS="-lpthread -lm -ldl ${{ matrix.extra_libs_hw }}"
+          EXTRA_LDFLAGS="-L\$BUILD_PREFIX/lib"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            EXTRA_LIBS="-lpthread -lm ${{ matrix.extra_libs_hw }}"
+            EXTRA_LDFLAGS="-L\$BUILD_PREFIX/lib -static"
+          fi
+          cat > release/ffmpeg-${{ matrix.platform }}-NOTICE.txt <<EOF
+          ffmpeg and ffprobe (${{ matrix.platform }}) are licensed GPL-2.0-or-later,
+          built from unmodified upstream FFmpeg ${{ env.FFMPEG_TAG }}
+          (https://github.com/FFmpeg/FFmpeg) with libx264 statically linked from
+          videolan/x264 commit ${{ env.X264_COMMIT }}
+          (https://code.videolan.org/videolan/x264), enabled by --enable-gpl
+          --enable-libx264.
+
+          Complete corresponding source for both, at the exact pinned revisions
+          above, is attached to this same release as ffmpeg-x264-sources.tar.gz.
+          The build script that controls compilation is build-ffmpeg.yml in this
+          repository (vodlabs-io/custom-ffmpeg) at this release's commit.
+
+          Exact configure invocation used for this platform:
+
+            ./configure \\
+              --prefix=\$BUILD_PREFIX \\
+              --extra-cflags="-I\$BUILD_PREFIX/include" \\
+              --extra-ldflags="$EXTRA_LDFLAGS" \\
+              ${{ env.FFMPEG_CONFIGURE_FLAGS }} \\
+              ${{ matrix.hw_flags }} \\
+              --extra-libs="$EXTRA_LIBS"
+
+          x264 was configured with:
+
+            ./configure --prefix=\$BUILD_PREFIX --enable-static --enable-pic \\
+              --disable-shared --disable-cli
+          EOF
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: ffmpeg-${{ matrix.platform }}
-          path: release/ffmpeg-${{ matrix.platform }}.tar.gz
+          path: |
+            release/ffmpeg-${{ matrix.platform }}.tar.gz
+            release/ffmpeg-${{ matrix.platform }}-NOTICE.txt
+          retention-days: 90
+
+  package-sources:
+    # Independent of the build matrix: same pinned source regardless of which
+    # platform requested it, so this runs once per workflow run rather than
+    # once per matrix leg.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Fetch pinned FFmpeg and x264 source
+        shell: bash
+        run: |
+          git clone --depth 1 --branch ${{ env.FFMPEG_TAG }} https://github.com/FFmpeg/FFmpeg.git ffmpeg-source
+          rm -rf ffmpeg-source/.git
+
+          mkdir x264-source && cd x264-source
+          git init -q
+          git remote add origin https://code.videolan.org/videolan/x264.git
+          git fetch --depth 1 origin ${{ env.X264_COMMIT }}
+          git checkout -q FETCH_HEAD
+          cd ..
+          rm -rf x264-source/.git
+
+      - name: Package sources
+        shell: bash
+        run: |
+          cat > SOURCE-NOTICE.txt <<EOF
+          Unmodified upstream source for the GPL-2.0-or-later ffmpeg/ffprobe
+          binaries in vodlabs-io/custom-ffmpeg releases:
+
+            FFmpeg ${{ env.FFMPEG_TAG }} (https://github.com/FFmpeg/FFmpeg)
+            x264 commit ${{ env.X264_COMMIT }} (https://code.videolan.org/videolan/x264)
+
+          build-ffmpeg.yml is the exact script that controls compilation
+          (configure flags per platform, in the FFMPEG_CONFIGURE_FLAGS env
+          block and each matrix entry's hw_flags).
+          EOF
+          mkdir -p sources-bundle
+          cp SOURCE-NOTICE.txt sources-bundle/
+          cp .github/workflows/build-ffmpeg.yml sources-bundle/
+          cp -r ffmpeg-source sources-bundle/
+          cp -r x264-source sources-bundle/
+          tar czf ffmpeg-x264-sources.tar.gz -C sources-bundle .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ffmpeg-x264-sources
+          path: ffmpeg-x264-sources.tar.gz
           retention-days: 90
 
   create-release:
-    needs: build-ffmpeg
+    needs: [build-ffmpeg, package-sources]
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
-    
+
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
           path: artifacts
-      
+
       - name: List artifacts
         run: |
           echo "Downloaded artifacts:"
           find artifacts -type f
-      
+
       - name: Create release bundle
         run: |
           mkdir -p release-bundle
           cp artifacts/ffmpeg-*/ffmpeg-*.tar.gz release-bundle/
+          cp artifacts/ffmpeg-*/ffmpeg-*-NOTICE.txt release-bundle/
+          cp artifacts/ffmpeg-x264-sources/ffmpeg-x264-sources.tar.gz release-bundle/
           cd release-bundle
           ls -lh
-      
+
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ffmpeg-${{ github.run_number }}-${{ github.run_attempt }}
           name: FFmpeg Build ${{ github.run_number }}
           body: |
-            Minimal FFmpeg + ffprobe builds for VodLabs Recorder.
+            Minimal FFmpeg + ffprobe builds for VodLabs Recorder, built from
+            FFmpeg ${{ env.FFMPEG_TAG }} and x264 commit ${{ env.X264_COMMIT }}.
+
             Each `ffmpeg-<platform>.tar.gz` contains both `ffmpeg` and
             `ffprobe` (H.264 hardware encoders where the platform supports
             them, libx264 fallback everywhere). Consumed by the recorder's
             `internal/ffmpeg/download.sh`.
-          files: release-bundle/ffmpeg-*.tar.gz
+
+            The binaries are GPL-2.0-or-later (`--enable-gpl --enable-libx264`).
+            Each `ffmpeg-<platform>-NOTICE.txt` names the exact configure line
+            for that platform; `ffmpeg-x264-sources.tar.gz` is the complete
+            corresponding source at the pinned revisions above.
+          files: release-bundle/*
           draft: false
           prerelease: false
         env:
