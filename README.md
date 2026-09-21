@@ -23,3 +23,23 @@ To build new FFmpeg binaries:
 2. Select "Build Minimal FFmpeg" workflow  
 3. Click "Run workflow"
 4. Wait for builds to complete
+
+Each build is pinned to an exact FFmpeg tag and x264 commit, set at the top of
+`.github/workflows/build-ffmpeg.yml` (`FFMPEG_TAG`, `X264_COMMIT`). Bump them
+deliberately, in a commit that names the new revisions.
+
+## License
+
+The binaries are **GPL-2.0-or-later**: they're built with `--enable-gpl
+--enable-libx264`, and libx264 is itself GPL. Every release therefore
+includes, alongside each `ffmpeg-<platform>.tar.gz`:
+
+- `ffmpeg-<platform>-NOTICE.txt` — the exact `configure` invocation used for
+  that platform, and where to get the source.
+- `ffmpeg-x264-sources.tar.gz` — the complete, unmodified FFmpeg and x264
+  source trees at the pinned revisions above, plus the workflow file that
+  controls compilation. Attached once per release, shared by every platform.
+
+This repository's own code (the build workflow, this README) is licensed
+under the [MIT License](LICENSE) — a separate license from the binaries it
+produces.
