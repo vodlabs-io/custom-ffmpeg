@@ -91,6 +91,11 @@ jobs:
       # eq applies the recorder's timed brightness offsets when parts are
       # re-encoded onto a common canvas; sendcmd drives it from a script.
       #
+      # xlib and libxcb are autodetected from the macOS runners' Homebrew X11,
+      # and a successful X11 probe links libavutil against it even with every
+      # X11 component disabled, so the binaries wouldn't launch on a Mac
+      # without Homebrew X11. Nothing here uses X11.
+      #
       # This is a folded scalar: every line below is joined into one shell word
       # list, so a "#" here would comment out the rest of the command line.
       FFMPEG_CONFIGURE_FLAGS: >-
@@ -99,6 +104,8 @@ jobs:
         --enable-libx264
         --enable-static
         --disable-everything
+        --disable-xlib
+        --disable-libxcb
         --enable-protocol=file
         --enable-protocol=pipe
         --enable-demuxer=flv
@@ -455,6 +462,26 @@ jobs:
           BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
           strip "$BUILD_PREFIX/bin/ffmpeg"
           strip "$BUILD_PREFIX/bin/ffprobe"
+
+      # The runners carry Homebrew libraries that users' Macs don't, so any
+      # dylib outside the OS breaks the shipped binaries at launch.
+      - name: Check binaries link only system libraries (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
+          status=0
+          for bin in ffmpeg ffprobe; do
+            otool -L "$BUILD_PREFIX/bin/$bin"
+            bad=$(otool -L "$BUILD_PREFIX/bin/$bin" | tail -n +2 | awk '{print $1}' \
+              | grep -vE '^(/usr/lib/|/System/Library/)' || true)
+            if [ -n "$bad" ]; then
+              echo "ERROR: $bin links non-system libraries:"
+              echo "$bad"
+              status=1
+            fi
+          done
+          exit $status
 
       - name: Strip binaries (Windows)
         if: runner.os == 'Windows'
