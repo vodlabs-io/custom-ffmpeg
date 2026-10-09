@@ -84,6 +84,10 @@ jobs:
       # audio-only VOD; audio survives only because the aac demuxer is already
       # pulled in. Keep them in step with the enabled video decoders.
       #
+      # The opus decoder and parser read the Opus audio of Agora RTC broadcasts
+      # (enhanced-FLV Opus): the parser fills in the channel layout when
+      # probing, and the decoder feeds the merge's AAC re-encode.
+      #
       # eq applies the recorder's timed brightness offsets when parts are
       # re-encoded onto a common canvas; sendcmd drives it from a script.
       #
@@ -112,12 +116,14 @@ jobs:
         --enable-decoder=hevc
         --enable-decoder=aac
         --enable-decoder=mp3
+        --enable-decoder=opus
         --enable-encoder=libx264
         --enable-encoder=aac
         --enable-parser=h264
         --enable-parser=hevc
         --enable-parser=aac
         --enable-parser=mpegaudio
+        --enable-parser=opus
         --enable-bsf=h264_mp4toannexb
         --enable-bsf=hevc_mp4toannexb
         --enable-bsf=aac_adtstoasc
@@ -512,6 +518,9 @@ jobs:
             -vf "sendcmd=f=dither.txt,eq=brightness=0" \
             -c:v libx264 -preset ultrafast -crf 30 -f null -
           rm -f dither.txt
+
+          echo "=== opus decoder present (Agora RTC audio) ==="
+          "$FF" -hide_banner -decoders 2>/dev/null | grep -E '^ A[^ ]* opus '
 
           echo "Merge-path smoke test passed"
 
