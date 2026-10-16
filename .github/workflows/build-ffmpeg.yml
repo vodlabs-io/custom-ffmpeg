@@ -12,7 +12,30 @@ env:
   X264_COMMIT: b35605ace3ddf7c1a5d67a2eb553f034aef41d55 # videolan/x264 stable branch
 
 jobs:
+  # A short VP8 + Opus WebM for the smoke test. The minimal build has no VP8 or
+  # Opus encoder, so the distro ffmpeg makes it, written live (unknown sizes,
+  # no cues) like a recording in progress.
+  vp8-fixture:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Encode fixture
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          ffmpeg -hide_banner -loglevel error \
+            -f lavfi -i "testsrc=size=320x240:rate=30:duration=2" \
+            -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=2" \
+            -c:v libvpx -b:v 300k -c:a libopus -live 1 -f webm vp8-opus.webm
+
+      - name: Upload fixture
+        uses: actions/upload-artifact@v7
+        with:
+          name: vp8-fixture
+          path: vp8-opus.webm
+          retention-days: 1
+
   build-ffmpeg:
+    needs: vp8-fixture
     strategy:
       fail-fast: false
       matrix:
@@ -88,6 +111,11 @@ jobs:
       # (enhanced-FLV Opus): the parser fills in the channel layout when
       # probing, and the decoder feeds the merge's AAC re-encode.
       #
+      # The matroska demuxer, vp8 decoder/parser and webm muxer handle the VP8
+      # video of browser-broadcast Agora RTC channels, which the recorder
+      # writes as WebM (neither enhanced FLV nor MP4 can carry VP8 here). The
+      # merge re-encodes it to H.264.
+      #
       # eq applies the recorder's timed brightness offsets when parts are
       # re-encoded onto a common canvas; sendcmd drives it from a script.
       #
@@ -117,13 +145,16 @@ jobs:
         --enable-demuxer=concat
         --enable-demuxer=h264
         --enable-demuxer=hevc
+        --enable-demuxer=matroska
         --enable-muxer=mp4
         --enable-muxer=mpegts
+        --enable-muxer=webm
         --enable-decoder=h264
         --enable-decoder=hevc
         --enable-decoder=aac
         --enable-decoder=mp3
         --enable-decoder=opus
+        --enable-decoder=vp8
         --enable-encoder=libx264
         --enable-encoder=aac
         --enable-parser=h264
@@ -131,6 +162,7 @@ jobs:
         --enable-parser=aac
         --enable-parser=mpegaudio
         --enable-parser=opus
+        --enable-parser=vp8
         --enable-bsf=h264_mp4toannexb
         --enable-bsf=hevc_mp4toannexb
         --enable-bsf=aac_adtstoasc
@@ -513,6 +545,12 @@ jobs:
           echo "=== H.264 encoders present ==="
           "$BUILD_PREFIX/bin/ffmpeg$EXT" -hide_banner -encoders 2>/dev/null | grep -Ei 'h264|264' || true
 
+      - name: Download VP8 fixture
+        uses: actions/download-artifact@v8
+        with:
+          name: vp8-fixture
+          path: fixture
+
       # Runs the recorder's exact merge-path commands with the software
       # encoder (CI runners have no GPU). Both MUST succeed — a build that
       # passes -version but fails these would break every merge at runtime
@@ -548,6 +586,19 @@ jobs:
 
           echo "=== opus decoder present (Agora RTC audio) ==="
           "$FF" -hide_banner -decoders 2>/dev/null | grep -E '^ A[^ ]* opus '
+
+          echo "=== VP8 + Opus WebM: probe, re-encode to H.264/AAC MP4, concat copy to WebM ==="
+          "$BUILD_PREFIX/bin/ffprobe$EXT" -v error -show_entries stream=codec_name \
+            -of csv=p=0 fixture/vp8-opus.webm | tr -d '\r' | tee probe.txt
+          grep -qx vp8 probe.txt
+          grep -qx opus probe.txt
+          "$FF" -hide_banner -loglevel error -i fixture/vp8-opus.webm \
+            -c:v libx264 -preset ultrafast -crf 30 -pix_fmt yuv420p -c:a aac \
+            -movflags +faststart -f mp4 -y vp8.mp4
+          printf "file 'fixture/vp8-opus.webm'\nfile 'fixture/vp8-opus.webm'\n" > list.txt
+          "$FF" -hide_banner -loglevel error -f concat -safe 0 -i list.txt \
+            -c copy -f webm -y joined.webm
+          rm -f probe.txt vp8.mp4 list.txt joined.webm
 
           echo "Merge-path smoke test passed"
 
