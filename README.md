@@ -14,6 +14,7 @@ Minimal static FFmpeg binaries optimized for post-processing recorded live strea
 - Linux x86_64 (linux_amd64)
 - Linux ARM64 (linux_arm64)
 - Windows x86_64 (windows_amd64)
+- Windows ARM64 (windows_arm64)
 
 ## Creating a Release
 
