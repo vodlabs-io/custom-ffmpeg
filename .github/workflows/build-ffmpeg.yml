@@ -107,6 +107,9 @@ jobs:
             platform: windows_arm64
             arch: aarch64
             msystem: CLANGARM64
+            # CLANGARM64 has no gcc, which x264 and FFmpeg default to.
+            cc: clang
+            toolchain_flags: --cc=clang --cxx=clang++
             hw_flags: >-
               --enable-mediafoundation
               --enable-encoder=h264_mf
@@ -338,7 +341,7 @@ jobs:
           # Navigate to x264 source
           cd x264-source
           
-          ./configure --prefix="$BUILD_PREFIX" \
+          ${{ matrix.cc && format('CC={0} ', matrix.cc) || '' }}./configure --prefix="$BUILD_PREFIX" \
             --enable-static \
             --enable-pic \
             --disable-shared \
@@ -492,6 +495,7 @@ jobs:
             --prefix="$BUILD_PREFIX" \
             --extra-cflags="-I$BUILD_PREFIX/include" \
             --extra-ldflags="-L$BUILD_PREFIX/lib -static" \
+            ${{ matrix.toolchain_flags }} \
             ${{ env.FFMPEG_CONFIGURE_FLAGS }} \
             ${{ matrix.hw_flags }} \
             --extra-libs="-lpthread -lm ${{ matrix.extra_libs_hw }}"
@@ -677,13 +681,14 @@ jobs:
               --prefix=\$BUILD_PREFIX \\
               --extra-cflags="-I\$BUILD_PREFIX/include" \\
               --extra-ldflags="$EXTRA_LDFLAGS" \\
+              ${{ matrix.toolchain_flags }} \\
               ${{ env.FFMPEG_CONFIGURE_FLAGS }} \\
               ${{ matrix.hw_flags }} \\
               --extra-libs="$EXTRA_LIBS"
 
           x264 was configured with:
 
-            ./configure --prefix=\$BUILD_PREFIX --enable-static --enable-pic \\
+            ${{ matrix.cc && format('CC={0} ', matrix.cc) || '' }}./configure --prefix=\$BUILD_PREFIX --enable-static --enable-pic \\
               --disable-shared --disable-cli
           EOF
 
