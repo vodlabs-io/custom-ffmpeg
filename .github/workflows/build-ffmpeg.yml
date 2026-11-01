@@ -15,6 +15,10 @@ env:
   # commit that names the new tag/commit.
   FFMPEG_TAG: n9.0.2
   X264_COMMIT: b35605ace3ddf7c1a5d67a2eb553f034aef41d55 # videolan/x264 stable branch
+  # The oldest NVENC SDK this FFmpeg accepts. NVENC needs a driver supporting
+  # the API it was built against (531.61+ for 12.1), and newer drivers still
+  # accept it, so older GPUs and drivers keep working.
+  NV_CODEC_HEADERS_TAG: n12.1.14.1
 
 jobs:
   # A short VP8 + Opus WebM for the smoke test. The minimal build has no VP8 or
@@ -365,7 +369,7 @@ jobs:
         shell: bash
         run: |
           BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
-          git clone --depth 1 https://github.com/FFmpeg/nv-codec-headers.git nv-codec-headers
+          git clone --depth 1 --branch "$NV_CODEC_HEADERS_TAG" https://github.com/FFmpeg/nv-codec-headers.git nv-codec-headers
           make -C nv-codec-headers PREFIX="$BUILD_PREFIX" install
           cat "$BUILD_PREFIX/lib/pkgconfig/ffnvcodec.pc" || true
 
@@ -378,7 +382,7 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE"
           BUILD_PREFIX="$(cd .. && pwd)/ffmpeg-build"
-          git clone --depth 1 https://github.com/FFmpeg/nv-codec-headers.git nv-codec-headers
+          git clone --depth 1 --branch "$NV_CODEC_HEADERS_TAG" https://github.com/FFmpeg/nv-codec-headers.git nv-codec-headers
           make -C nv-codec-headers PREFIX="$BUILD_PREFIX" install
           cat "$BUILD_PREFIX/lib/pkgconfig/ffnvcodec.pc" || true
 

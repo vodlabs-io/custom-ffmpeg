@@ -25,9 +25,11 @@ To build new FFmpeg binaries:
 3. Click "Run workflow"
 4. Wait for builds to complete
 
-Each build is pinned to an exact FFmpeg tag and x264 commit, set at the top of
-`.github/workflows/build-ffmpeg.yml` (`FFMPEG_TAG`, `X264_COMMIT`). Bump them
-deliberately, in a commit that names the new revisions.
+Each build is pinned to an exact FFmpeg tag, x264 commit and nv-codec-headers
+tag, set at the top of `.github/workflows/build-ffmpeg.yml` (`FFMPEG_TAG`,
+`X264_COMMIT`, `NV_CODEC_HEADERS_TAG`). Bump them deliberately, in a commit
+that names the new revisions. Keep `NV_CODEC_HEADERS_TAG` at the oldest SDK
+FFmpeg accepts: a newer one raises the NVIDIA driver NVENC needs.
 
 ## License
 
